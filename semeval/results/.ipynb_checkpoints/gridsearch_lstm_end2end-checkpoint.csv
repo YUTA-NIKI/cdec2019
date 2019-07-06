@@ -1,0 +1,1 @@
+w2v_name, embedding_dim, batch_size, learning_rate, l2_regular, hidden_dim, dropout_rate, epoch, accuracy, precision, recall, f1

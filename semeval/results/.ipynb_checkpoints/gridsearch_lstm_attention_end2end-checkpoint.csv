@@ -1,0 +1,2 @@
+epoch, batch_size, embedding_dim, hidden_dim, activate_func, learning_rate, l2_regular, dropout_rate, accuracy, precision, recall, f1
+100,64,100,100,tanh,0.1,0,0.0,0.9499447920500552,0.8787709768163741,0.8886850554880601,0.8836361529314549
