@@ -173,8 +173,8 @@ def main():
     vocab_idx = dict(zip(vocab, range(len(vocab))))
     del vocab
     
-    X_train = df2input(train_df, vocab_idx)
-    X_test  = df2input(test_df, vocab_idx)
+    X_train = df2input(X_train, vocab_idx)
+    X_test  = df2input(X_test, vocab_idx)
 
     train_ds = MyDataset(X_train, y_train.values)
     test_ds  = MyDataset(X_test, y_test.values)
