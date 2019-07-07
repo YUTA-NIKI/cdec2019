@@ -215,6 +215,11 @@ def main():
                             for l2 in l2_list:
                                 for epoch in epoch_list:
 
+                                    df = pd.read_csv(os.path.join(os.getcwd(), 'results/gridsearch_lstm_attention_end2end.csv'))
+                                    if len(df.query('epoch == @epoch & batch_size == @batch_size & embedding_dim == @emb_dim & hidden_dim == @hidden_dim & activate_func == @activate & learning_rate == @lr & l2_regular == @l2 & dropout_rate == @dropout_rate')) == 1:
+                                        continue
+                                    del df
+                                    
                                     np.random.seed(2019)
                                     np.random.RandomState(2019)
                                     torch.manual_seed(2019)
