@@ -1,0 +1,1 @@
+epoch,batch_size,embedding_dim,hidden_dim,activate_func,optimizer,learning_rate,l2_regular,dropout_rate,accuracy,precision,recall,f1,auc
