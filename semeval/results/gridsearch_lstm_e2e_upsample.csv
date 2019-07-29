@@ -1,1 +1,5 @@
 epoch,batch_size,embedding_dim,hidden_dim,activate_func,optimizer,learning_rate,l2_regular,dropout_rate,accuracy,precision,recall,f1,auc
+200,64,200,100,tanh,adam,0.1,0.0,0.0,0.8792786161207213,0.0,0.0,0.0,0.5
+300,64,200,100,tanh,adam,0.1,0.0,0.0,0.1207213838792786,0.1207213838792786,1.0,0.21543513957307064,0.5
+200,64,200,100,tanh,adam,0.1,0.001,0.0,0.8789105631210894,0.0,0.0,0.0,0.4997907074089577
+250,64,200,100,tanh,adam,0.1,0.0,0.0,0.8792786161207213,0.0,0.0,0.0,0.5
