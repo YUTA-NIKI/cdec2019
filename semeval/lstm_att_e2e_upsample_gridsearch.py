@@ -216,17 +216,18 @@ def main():
 
     train_ds = MyDataset(X_train, y_train)
     test_ds  = MyDataset(X_test, y_test)
+    del X_train, X_test, y_train
     
     vocab_size = len(vocab_idx)+1    # 語彙数
     emb_list   = [200, 300]          # 分散表現の次元数
 
-    epoch_list   = [200, 300]        # エポック数
+    epoch_list   = [200, 250]        # エポック数
     batch_list   = [64, 128, 256]    # バッチサイズ
     hidden_list  = [100, 200, 300]   # 隠れ層の次元数
     dropout_list = [0.0, 0.5]        # Dropout率
     activate_list = ['tanh', 'relu'] # 活性化関数
     optimizers   = ['adam', 'sgd']   # Optimizer
-    lr_list = [0.1, 0.01, 0.001]     # 学習率
+    lr_list = [0.1, 0.001]           # 学習率
     l2_list = [0, 1e-3]              # l2正則化
 
     i = 0
@@ -248,7 +249,7 @@ def main():
                                 for l2 in l2_list:
                                     for epoch in epoch_list:
 
-                                        df = pd.read_csv(os.path.join(os.getcwd(), 'results/gridsearch_lstm_attention_end2end.csv'))
+                                        df = pd.read_csv(os.path.join(os.getcwd(), 'results/gridsearch_lstm_att_e2e_upsample.csv'))
                                         if len(df.query('epoch == @epoch & batch_size == @batch_size & embedding_dim == @emb_dim & hidden_dim == @hidden_dim & activate_func == @activate & optimizer == @opt & learning_rate == @lr & l2_regular == @l2 & dropout_rate == @dropout_rate')) == 1:
                                             continue
                                         del df
@@ -273,7 +274,7 @@ def main():
                                         write_ser = pd.Series([
                                             epoch, batch_size, emb_dim, hidden_dim, activate, opt, lr, l2, dropout_rate, result[0], result[1], result[2], result[3], result[4]
                                         ], index = df.columns)
-                                        df.append(write_ser, ignore_index=True).to_csv(os.path.join(os.getcwd(), 'results/gridsearch_lstm_attention_end2end.csv'), index=False)
+                                        df.append(write_ser, ignore_index=True).to_csv(os.path.join(os.getcwd(), 'results/gridsearch_lstm_att_e2e_upsample.csv'), index=False)
                                         del df, net, criterion, optimizer
                                     
         del train_loader, test_loader

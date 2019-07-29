@@ -211,17 +211,18 @@ def main():
 
     train_ds = MyDataset(X_train, y_train)
     test_ds  = MyDataset(X_test, y_test)
+    del X_train, X_test, y_train
     
     vocab_size = len(vocab_idx)+1    # 語彙数
     emb_list   = [200, 300]          # 分散表現の次元数
 
-    epoch_list   = [200, 300, 400]   # エポック数
+    epoch_list   = [200, 300]   # エポック数
     batch_list   = [64, 128, 256]    # バッチサイズ
     hidden_list  = [100, 200, 300]   # 隠れ層の次元数
     dropout_list = [0.0, 0.5]        # Dropout率
     activate_list = ['tanh', 'relu'] # 活性化関数
     optimizers   = ['adam', 'sgd']   # Optimizer
-    lr_list = [0.1, 0.01, 0.001]     # 学習率
+    lr_list = [0.1, 0.001]           # 学習率
     l2_list = [0, 1e-3]              # l2正則化
 
     i = 0
