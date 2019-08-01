@@ -1,0 +1,261 @@
+import os
+import requests
+import json
+import numpy as np
+import pandas as pd
+
+from tqdm import tqdm
+
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix, roc_auc_score
+
+import spacy
+from bs4 import BeautifulSoup
+from gensim.models import word2vec
+
+import torch
+from torch.autograd import Variable
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.utils.data import Dataset, TensorDataset, DataLoader
+
+def confusion2score(confusion):
+    tp, fn, fp, tn = confusion.ravel()
+    if tp == None:
+        tp = 0
+    if fn == None:
+        fn = 0
+    if fp == None:
+        fp = 0
+    if tn == None:
+        tn = 0
+    acc = (tp + tn) / (tp + fn + fp + tn)
+    if (tp+fp) == 0:
+        pre=0
+    else:
+        pre = tp / (tp + fp)
+    if (tp+fn) == 0:
+        rec=0
+    else:
+        rec = tp / (tp + fn)
+    if (2*tp+fp+fn) == 0:
+        f1=0
+    else:
+        f1  = (2 * tp) / (2*tp + fp + fn)
+    return (acc, pre, rec, f1)
+
+spacy_en = spacy.load('en')
+def tokenizer(text):
+    soup = BeautifulSoup(text)
+    clean_txt = soup.get_text()
+    words = []
+    for tok in spacy_en.tokenizer(clean_txt):
+        if tok.text not in "[],.();:<>{}|*-~":
+            words.append(tok.lemma_)
+    return words
+
+def df2indexseq(df, w2v):
+    data = []
+    for text in df.values:
+        words = tokenizer(text)
+        data.append([w2v.wv.vocab[word].index + 1 for word in words if word in w2v])
+    return data
+
+def padding(data):
+    # npに変換し、0埋めを行う
+    max_length = max([len(d) for d in data])
+    padded_data = np.zeros((len(data), max_length))  # 0で埋める
+    for i, d1 in enumerate(data):
+        for j, d2 in enumerate(d1):
+            padded_data[i][j] = d2
+    return padded_data
+
+class MyDataset(torch.utils.data.Dataset):
+    def __init__(self, data, tags):
+        super(MyDataset, self).__init__()
+        assert len(data) == len(tags)
+        self.data = data
+        self.tags = tags
+        
+    def __len__(self):
+        return len(self.tags)
+    
+    def __getitem__(self, index):
+        return self.data[index], self.tags[index]
+
+class LSTM(nn.Module):
+    def __init__(self, batch_size, w2v, hidden_dim, dropout_rate=0.0, activate='tanh', bidirectional=False, device='cpu'):
+        super(LSTM, self).__init__()
+        self.batch_size = batch_size
+        
+        vectors         = w2v.wv.vectors
+        vectors         = np.insert(vectors, 0, 0, axis=0) # 0行目をパディング用に
+        self.vocab_size = vectors.shape[0]
+        self.emb_dim    = vectors.shape[1]
+        self.emb        = nn.Embedding(self.vocab_size, self.emb_dim, padding_idx=0)
+        self.emb.weight = nn.Parameter(torch.from_numpy(vectors))
+        self.emb.weight.requires_grad = False
+        
+        self.bidirectional = bidirectional
+        self.hidden_dim = hidden_dim
+        self.lstm = nn.LSTM(self.emb_dim, self.hidden_dim, batch_first=True, bidirectional=self.bidirectional)
+        
+        self.activate   = activate
+        self.fc0 = nn.Linear(hidden_dim * 2, 100)
+        self.fc1 = nn.Linear(100, 2)
+        self.do  = nn.Dropout(dropout_rate)
+        self.device = device
+        self.hidden = self.init_hidden()
+
+    def forward(self, x):
+
+        x = self.emb(x)
+        lstm_out, self.hidden = self.lstm(x, self.hidden)
+        y = self.fc0(torch.cat([self.hidden[0][-1], self.hidden[0][-2]], 1))
+        y = self.do(y)
+        if self.activate == 'tanh':
+            y = self.fc1(torch.tanh(y))
+        elif self.activate == 'relu':
+            y = self.fc1(torch.relu(y))
+        tag_scores = F.log_softmax(y)
+        return tag_scores
+
+    def init_hidden(self):
+        # The axes semantics are (num_layers, minibatch_size, hidden_dim)
+        num = 2 if self.bidirectional else 1    # bidirectionalのとき2
+        h0 = torch.zeros(num, self.batch_size, self.hidden_dim).to(self.device)
+        c0 = torch.zeros(num, self.batch_size, self.hidden_dim).to(self.device)
+        return (h0, c0)
+    
+def training(net, train_loader, epoch_num, optimizer, criterion):
+
+    for epoch in range(epoch_num):
+
+        train_loss = 0.0
+        train_acc  = 0.0
+
+        # train====================
+        net.train()
+        for xx, yy in train_loader:
+            net.batch_size = len(yy)
+            net.hidden = net.init_hidden()
+
+            optimizer.zero_grad()    # 勾配の初期化
+
+            output = net(xx)
+            loss   = criterion(output, yy)
+
+            train_loss += loss.item()
+            train_acc += (output.max(1)[1] == yy).sum().item()
+
+            loss.backward(retain_graph=True)     # 逆伝播の計算
+            optimizer.step()    # 勾配の更新
+
+def test(net, test_loader, y_test):
+    net.eval()
+    y_pred = np.zeros((1,2))
+    with torch.no_grad():
+        for xx, yy in test_loader:
+            net.batch_size = len(yy)
+            net.hidden = net.init_hidden()
+
+            output = net(xx)
+            y_pred = np.concatenate([y_pred, output.to('cpu').numpy()], axis=0)
+
+    confusion = confusion_matrix(y_test, np.argmax(y_pred[1:,], axis=1).tolist())
+    scores = confusion2score(confusion)
+    auc = roc_auc_score(y_test, np.argmax(y_pred[1:,], axis=1).tolist())
+    return [scores[0], scores[1], scores[2], scores[3], auc]
+
+def slack_notification(arg_str):
+    requests.post('https://hooks.slack.com/services/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', data = json.dumps({
+        'text': arg_str, # 投稿するテキスト
+        'username': u'yniki', # 投稿のユーザー名
+    }))
+
+def main():
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    
+    train_df = pd.read_csv('/home/b2018yniki/data/semeval2010task8/train_original.tsv', sep='\t')
+    train_df = train_df.assign(causal_flag = [0 if 'Cause-Effect' in relation else 1 for relation in train_df.relation.values]).drop(['relation', 'comment'], axis=1)
+    train_df.body = [text.replace('"', '') for text in train_df.body.values]
+    test_df = pd.read_csv('/home/b2018yniki/data/semeval2010task8/test_original.tsv', sep='\t')
+    test_df = test_df.assign(causal_flag = [0 if 'Cause-Effect' in relation else 1 for relation in test_df.relation.values]).drop(['relation', 'comment'], axis=1)
+    test_df.body = [text.replace('"', '') for text in test_df.body.values]
+
+    w2v_list =['w2v_enwiki_d200_w12_without_preprocessed.model', 'w2v_enwiki_d300_w12_without_preprocessed.model', 'w2v_enwiki_d400_w12_without_preprocessed.model']
+
+    epoch_list   = [200, 300, 400]   # エポック数
+    batch_list   = [64, 128, 256]    # バッチサイズ
+    hidden_list  = [100, 200, 300]   # 隠れ層の次元数
+    dropout_list = [0.0, 0.5]        # Dropout率
+    activate_list = ['tanh', 'relu'] # 活性化関数
+    optimizers   = ['adam', 'sgd']   # Optimizer
+    lr_list = [0.1, 0.001]           # 学習率
+    l2_list = [0, 1e-3]              # l2正則化
+
+    i = 0
+    for w2v_name in tqdm(w2v_list):
+        w2v = word2vec.Word2Vec.load(os.path.join("/home/b2018yniki/cdec2019/semeval/word2vec", w2v_name))
+        
+        X_train = torch.LongTensor(padding(df2indexseq(train_df.body, w2v))).to(device)
+        y_train = torch.LongTensor(train_df.causal_flag.values).to(device)
+        X_test  = torch.LongTensor(padding(df2indexseq(test_df.body, w2v))).to(device)
+        y_test  = torch.LongTensor(test_df.causal_flag.values).to(device)
+
+        train_ds = MyDataset(X_train, y_train)
+        test_ds  = MyDataset(X_test, y_test)
+        del X_train, X_test, y_train
+        
+        for batch_size in batch_list:
+            np.random.seed(2019)
+            np.random.RandomState(2019)
+            torch.manual_seed(2019)
+
+            # dataloader(注意：validloader, testloaderのshuffleはFalse)
+            train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=0)
+            test_loader  = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=0)
+            for hidden_dim in hidden_list:
+                for dropout_rate in dropout_list:
+                    for activate in activate_list:
+                        for opt in optimizers:
+                            for lr in lr_list:
+                                for l2 in l2_list:
+                                    for epoch in epoch_list:
+
+                                        df = pd.read_csv(os.path.join(os.getcwd(), 'results/gridsearch_lstm_w2v.csv'))
+                                        if len(df.query('word2vec == @w2v_name & epoch == @epoch & batch_size == @batch_size & hidden_dim == @hidden_dim & activate_func == @activate & optimizer == @opt & learning_rate == @lr & l2_regular == @l2 & dropout_rate == @dropout_rate')) == 1:
+                                            continue
+                                        del df
+
+                                        np.random.seed(2019)
+                                        np.random.RandomState(2019)
+                                        torch.manual_seed(2019)
+
+                                        net = LSTM(batch_size, w2v, hidden_dim, dropout_rate, activate, bidirectional=True, device=device).to(device)
+                                        criterion = nn.NLLLoss()
+                                        if opt == 'sgd':
+                                            optimizer = optim.SGD(net.parameters(), lr=lr, weight_decay=l2)
+                                        elif opt == 'adam':
+                                            optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay=l2)
+
+                                        # Train Network
+                                        training(net, train_loader, epoch, optimizer, criterion)
+                                        # Test Network
+                                        result = test(net, test_loader, y_test.to('cpu').numpy())
+
+                                        df = pd.read_csv(os.path.join(os.getcwd(), 'results/gridsearch_lstm_w2v.csv'))
+                                        write_ser = pd.Series([
+                                            w2v_name, epoch, batch_size, hidden_dim, activate, opt, lr, l2, dropout_rate, result[0], result[1], result[2], result[3], result[4]
+                                        ], index = df.columns)
+                                        df.append(write_ser, ignore_index=True).to_csv(os.path.join(os.getcwd(), 'results/gridsearch_lstm_w2v.csv'), index=False)
+                                        del df, net, criterion, optimizer
+
+            del train_loader, test_loader
+        i += 1
+        notice = '{}/{} gridsearch is of LSTM \w w2v for semeval finished!!!'.format(i, len(w2v_list))
+        slack_notification(notice)
+                                    
+if __name__ == '__main__':
+    main()
